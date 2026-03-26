@@ -1,0 +1,11 @@
+{
+  "name": "fetch-todos",
+  "version": "0.1.0",
+  "description": "Fetch TODOs from referenced pages in Logseq",
+  "author": "Akshat",
+  "license": "MIT",
+  "main": "index.html",
+  "logseq": {
+    "id": "fetch-todos"
+  }
+}
