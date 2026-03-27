@@ -142,7 +142,7 @@ function renderTodoSelector() {
         </div>
       </div>
     `,
-    style: { width: "320px" },
+    style: { width: "410px" },
     attrs: { class: "fts-wrapper" },
   });
   logseq.showMainUI();
@@ -257,8 +257,8 @@ async function showTodoSelector() {
       border: 1px solid #444;
       border-radius: 8px;
       box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-      min-width: 200px;
-      max-width: 280px;
+      min-width: 400px;
+      max-width: 400px;
     }
     .fts-header {
       padding: 12px 16px;
