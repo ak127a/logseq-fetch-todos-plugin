@@ -9,25 +9,14 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.RELEASE_PAT }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Validate release token
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "Missing RELEASE_PAT secret (repo scope)."
-            echo "Add RELEASE_PAT so release events can trigger publish workflow."
-            exit 1
-          fi
 
       - name: Resolve version tag
         id: vars
@@ -42,6 +31,8 @@ jobs:
       - name: Check if release exists
         id: check
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           TAG="${{ steps.vars.outputs.tag }}"
@@ -54,6 +45,8 @@ jobs:
       - name: Create GitHub release
         if: steps.check.outputs.exists == 'false'
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           TAG="${{ steps.vars.outputs.tag }}"
@@ -61,6 +54,19 @@ jobs:
             --target "${{ github.sha }}" \
             --title "$TAG" \
             --notes "Automated release for version ${{ steps.vars.outputs.version }}"
+
+      - name: Trigger publish workflow
+        if: steps.check.outputs.exists == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api \
+            --method POST \
+            "repos/${{ github.repository }}/actions/workflows/publish.yml/dispatches" \
+            -f ref="${{ github.ref_name }}" \
+            -f "inputs[tag_name]=${{ steps.vars.outputs.tag }}"
 
       - name: Skip when release already exists
         if: steps.check.outputs.exists == 'true'
