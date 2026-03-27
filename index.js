@@ -89,7 +89,6 @@ let selectedTodoIndices = [];
 let currentTodos = [];
 let currentPageName = "";
 let sourceBlockUuid = null;
-let sourceParentUuid = null;
 
 function getEventTodoIndex(e) {
   let idx = null;
@@ -181,13 +180,23 @@ logseq.provideModel({
     }
 
     const selectedIndices = [...selectedTodoIndices].sort((a, b) => a - b);
-    const parentUuid = sourceParentUuid;
+    const selectedTodos = selectedIndices
+      .map((idx) => todos[idx])
+      .filter(Boolean);
 
-    // Insert TODOs as siblings, one after another, right below the current block.
+    if (selectedTodos.length === 0) {
+      logseq.App.showMsg("No valid TODOs selected.");
+      return;
+    }
+
+    const [firstTodo, ...remainingTodos] = selectedTodos;
+    const firstContent = `((${firstTodo.uuid}))`;
+    console.log("Fetch TODOs: updating source block with uuid =", firstTodo.uuid);
+    await logseq.Editor.updateBlock(sourceBlockUuid, firstContent);
+
+    // Insert remaining TODOs as siblings right below the updated current block.
     let insertAfterUuid = sourceBlockUuid;
-    for (const idx of selectedIndices) {
-      const todo = todos[idx];
-      if (!todo) continue;
+    for (const todo of remainingTodos) {
       console.log("Fetch TODOs: inserting todo with uuid =", todo.uuid);
       const content = `((${todo.uuid}))`;
       const inserted = await logseq.Editor.insertBlock(insertAfterUuid, content, {
@@ -197,9 +206,6 @@ logseq.provideModel({
       });
       if (inserted?.uuid) {
         insertAfterUuid = inserted.uuid;
-      } else if (parentUuid) {
-        // Fallback for older APIs: append under parent instead of nesting under current.
-        await logseq.Editor.insertBlock(parentUuid, content, { before: false, focus: false });
       }
     }
     
@@ -223,11 +229,6 @@ async function showTodoSelector() {
     return;
   }
   sourceBlockUuid = currentBlock.uuid || null;
-  sourceParentUuid = null;
-  if (currentBlock.parent?.id) {
-    const parentBlock = await logseq.Editor.getBlock(currentBlock.parent.id);
-    sourceParentUuid = parentBlock?.uuid || null;
-  }
 
   const pageName = await getReferencedPageName();
   console.log("Fetch TODOs: pageName =", pageName);
