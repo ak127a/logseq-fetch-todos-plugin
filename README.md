@@ -29,10 +29,13 @@ This plugin is currently a plain JavaScript Logseq plugin with:
 
 ## Release
 
-This repository includes a GitHub Actions workflow at `.github/workflows/publish.yml`.
+This repository includes two GitHub Actions workflows:
 
-To publish:
+- `.github/workflows/auto-release.yml` creates a GitHub release on push to `master`/`main` using `v<package.json version>`.
+- `.github/workflows/publish.yml` builds and uploads the plugin zip when a release is published.
 
-1. Create and push a tag like `v0.1.0`.
-2. Create a GitHub Release from that tag.
-3. Wait for the workflow to attach a plugin zip asset to the release.
+Notes:
+
+- Add a repo secret named `RELEASE_PAT` (GitHub PAT with `repo` scope).
+- To create a new release, bump `package.json` version before pushing.
+- If a release/tag for that version already exists, auto-release will skip.
