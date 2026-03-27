@@ -1,0 +1,40 @@
+name: Publish Logseq Plugin
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build release zip
+        id: build_zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_NAME="${{ github.event.release.tag_name || github.ref_name }}"
+          PLUGIN_NAME="$(node -p "require('./package.json').name")"
+          ZIP_NAME="${PLUGIN_NAME}-${TAG_NAME}.zip"
+
+          mkdir -p release
+
+          FILES=(index.html index.js package.json)
+          if [ -f "logo.png" ]; then FILES+=(logo.png); fi
+          if [ -f "README.md" ]; then FILES+=(README.md); fi
+
+          zip -r "release/${ZIP_NAME}" "${FILES[@]}"
+          echo "zip_path=release/${ZIP_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.build_zip.outputs.zip_path }}
