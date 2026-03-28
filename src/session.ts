@@ -4,9 +4,7 @@ export const TodoItemSchema = z.object({
   uuid: z.string().min(1),
   content: z.string().min(1),
   pageName: z.string().min(1),
-  parentHeading: z.string().min(1),
   path: z.string().min(1),
-  pageSnippet: z.string().min(1),
 });
 
 export type TodoItem = z.infer<typeof TodoItemSchema>;
@@ -61,9 +59,7 @@ export function filterTodos(todos: TodoItem[], query: string): Array<{ index: nu
   return todos
     .map((todo, index) => ({ index, todo }))
     .filter(({ todo }) => {
-      const haystack = [todo.content, todo.parentHeading, todo.path, todo.pageSnippet]
-        .join(" ")
-        .toLowerCase();
+      const haystack = [todo.content, todo.path].join(" ").toLowerCase();
       return haystack.includes(normalizedQuery);
     });
 }

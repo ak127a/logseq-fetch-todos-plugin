@@ -4052,9 +4052,7 @@
     uuid: external_exports.string().min(1),
     content: external_exports.string().min(1),
     pageName: external_exports.string().min(1),
-    parentHeading: external_exports.string().min(1),
-    path: external_exports.string().min(1),
-    pageSnippet: external_exports.string().min(1)
+    path: external_exports.string().min(1)
   });
   var SessionStatusSchema = external_exports.enum(["loading", "ready", "empty", "error"]);
   var SessionStateSchema = external_exports.object({
@@ -4093,7 +4091,7 @@
       return todos.map((todo, index) => ({ index, todo }));
     }
     return todos.map((todo, index) => ({ index, todo })).filter(({ todo }) => {
-      const haystack = [todo.content, todo.parentHeading, todo.path, todo.pageSnippet].join(" ").toLowerCase();
+      const haystack = [todo.content, todo.path].join(" ").toLowerCase();
       return haystack.includes(normalizedQuery);
     });
   }
@@ -4383,6 +4381,7 @@
       inset: 0;
       pointer-events: auto;
       color: var(--ls-primary-text-color, #0f172a);
+      font-size: 1.05rem;
     }
 
     .fts-backdrop {
@@ -4424,7 +4423,7 @@
 
     .fts-title {
       margin: 0;
-      font-size: 0.95rem;
+      font-size: 1.05rem;
       font-weight: 600;
       color: var(--ls-primary-text-color, #0f172a);
     }
@@ -4469,6 +4468,7 @@
       padding: 0.5rem 0.625rem;
       background: var(--ls-secondary-background-color, #ffffff);
       color: var(--ls-primary-text-color, #0f172a);
+      font-size: 0.95rem;
     }
 
     .fts-search:focus,
@@ -4494,7 +4494,7 @@
       color: var(--ls-primary-text-color, #0f172a);
       padding: 0.45rem 0.65rem;
       cursor: pointer;
-      font-size: 0.8rem;
+      font-size: 0.9rem;
       font-weight: 500;
       white-space: nowrap;
     }
@@ -4504,7 +4504,7 @@
     }
 
     .fts-count {
-      font-size: 0.8rem;
+      font-size: 0.9rem;
       color: var(--ls-secondary-text-color, #64748b);
     }
 
@@ -4522,7 +4522,7 @@
       color: var(--ls-secondary-text-color, #64748b);
       text-align: center;
       line-height: 1.4;
-      font-size: 0.88rem;
+      font-size: 0.98rem;
     }
 
     .fts-item {
@@ -4548,10 +4548,6 @@
       background: var(--ls-tertiary-background-color, #f8fafc);
     }
 
-    .fts-item.is-selected {
-      background: var(--ls-selection-background-color, rgba(37, 99, 235, 0.14));
-    }
-
     .fts-check {
       width: 1rem;
       height: 1rem;
@@ -4561,18 +4557,22 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.75rem;
+      font-size: 0.82rem;
+      line-height: 1;
       color: var(--ls-link-text-color, #2563eb);
       font-weight: 700;
     }
 
     .fts-item.is-selected .fts-check {
       border-color: var(--ls-link-text-color, #2563eb);
-      background: var(--ls-selection-background-color, rgba(37, 99, 235, 0.22));
+      background: var(--ls-link-text-color, #2563eb);
+      color: #ffffff;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+      text-shadow: 0 0 1px rgba(0, 0, 0, 0.3);
     }
 
     .fts-content {
-      font-size: 0.88rem;
+      font-size: 0.98rem;
       color: var(--ls-primary-text-color, #0f172a);
       margin-bottom: 0.18rem;
       line-height: 1.35;
@@ -4580,7 +4580,7 @@
 
     .fts-meta {
       display: block;
-      font-size: 0.74rem;
+      font-size: 0.84rem;
       color: var(--ls-secondary-text-color, #64748b);
       line-height: 1.3;
     }
@@ -4604,7 +4604,7 @@
     .fts-primary-btn {
       border-radius: 0.5rem;
       border: 1px solid var(--ls-border-color, #d4d4d8);
-      font-size: 0.82rem;
+      font-size: 0.92rem;
       font-weight: 600;
       padding: 0.52rem 0.9rem;
       cursor: pointer;
@@ -4673,8 +4673,6 @@
                 <span>
                   <span class="fts-content">${escapeHtml(todo.content)}</span>
                   <span class="fts-meta">Path: ${escapeHtml(todo.path)}</span>
-                  <span class="fts-meta">Parent: ${escapeHtml(todo.parentHeading)}</span>
-                  <span class="fts-meta">Snippet: ${escapeHtml(todo.pageSnippet)}</span>
                 </span>
               </button>
             `;
@@ -4685,7 +4683,7 @@
         id="fts-search-${session.sessionId}"
         class="fts-search"
         type="text"
-        placeholder="Search TODOs, paths, or snippets"
+        placeholder="Search TODOs or paths"
         value="${escapeHtml(session.searchQuery)}"
         aria-label="Search TODOs"
         data-action="updateSearchQuery"
@@ -4912,17 +4910,13 @@
       const heading = extractHeading(content);
       const cleanedAncestors = ancestors.filter(Boolean);
       if (todoText && block?.uuid) {
-        const parentHeading = cleanedAncestors[cleanedAncestors.length - 1] ?? "Page root";
-        const pathSegments = [`[[${pageName}]]`, ...cleanedAncestors];
+        const pathSegments = [`[[${pageName}]]`, ...cleanedAncestors, todoText];
         const path = pathSegments.join(" > ");
-        const pageSnippet = normalizeText(content).slice(0, 140) || todoText;
         todos.push({
           uuid: String(block.uuid),
           content: todoText,
           pageName,
-          parentHeading,
-          path,
-          pageSnippet
+          path
         });
       }
       const nextAncestors = todoText ? cleanedAncestors : heading ? [...cleanedAncestors, heading] : cleanedAncestors;
