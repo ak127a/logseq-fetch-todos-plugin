@@ -4728,6 +4728,47 @@
     }
     return renderReadyState(session);
   }
+  function setTodoItemSelectedState(itemElement, selected) {
+    itemElement.classList.toggle("is-selected", selected);
+    itemElement.setAttribute("aria-checked", selected ? "true" : "false");
+    const checkElement = itemElement.querySelector(".fts-check");
+    if (checkElement) {
+      checkElement.textContent = selected ? "\u2713" : "";
+    }
+  }
+  function syncSelectionSummary(sessionId) {
+    const session = getSession(sessionId);
+    if (!session || session.status !== "ready" || activeSessionId !== sessionId) {
+      return;
+    }
+    const selectedCount = session.selectedIndices.length;
+    const countLabel = `${selectedCount} selected`;
+    const rootSelector = `.fts-root[data-session-id='${sessionId}']`;
+    for (const countElement of Array.from(document.querySelectorAll(`${rootSelector} .fts-count`))) {
+      countElement.textContent = countLabel;
+    }
+    const addButton = document.querySelector(
+      `.fts-primary-btn[data-session-id='${sessionId}'][data-action='addSelectedTodos']`
+    );
+    if (addButton) {
+      addButton.disabled = selectedCount === 0;
+    }
+  }
+  function syncVisibleTodoSelectionState(sessionId) {
+    const session = getSession(sessionId);
+    if (!session || session.status !== "ready" || activeSessionId !== sessionId) {
+      return;
+    }
+    const selectedSet = new Set(session.selectedIndices);
+    for (const itemElement of Array.from(document.querySelectorAll(`.fts-item[data-session-id='${sessionId}']`))) {
+      const todoIndex = Number.parseInt(itemElement.dataset.index ?? "", 10);
+      if (Number.isNaN(todoIndex)) {
+        continue;
+      }
+      setTodoItemSelectedState(itemElement, selectedSet.has(todoIndex));
+    }
+    syncSelectionSummary(sessionId);
+  }
   function renderTodoSelector(sessionId) {
     const session = getSession(sessionId);
     if (!session || activeSessionId !== sessionId) {
@@ -5037,8 +5078,9 @@
           selectedIndices.sort((a, b) => a - b);
           return updateSessionState(current, { selectedIndices });
         });
-        if (updated) {
-          renderTodoSelector(sessionId);
+        if (updated?.status === "ready") {
+          setTodoItemSelectedState(actionElement, updated.selectedIndices.includes(todoIndex));
+          syncSelectionSummary(sessionId);
         }
         return;
       }
@@ -5051,12 +5093,12 @@
         const selectedSet = /* @__PURE__ */ new Set([...session.selectedIndices, ...filteredIndices]);
         const selectedIndices = Array.from(selectedSet).sort((a, b) => a - b);
         setSessionPatch(sessionId, { selectedIndices });
-        renderTodoSelector(sessionId);
+        syncVisibleTodoSelectionState(sessionId);
         return;
       }
       if (action === "clearSelection") {
         setSessionPatch(sessionId, { selectedIndices: [] });
-        renderTodoSelector(sessionId);
+        syncVisibleTodoSelectionState(sessionId);
         return;
       }
       if (action === "closeSelector") {
