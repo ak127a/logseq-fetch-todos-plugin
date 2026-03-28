@@ -5,8 +5,29 @@
   "author": "Akshat",
   "license": "MIT",
   "main": "index.html",
+  "scripts": {
+    "clean": "rm -f index.js",
+    "build": "npm run clean && esbuild src/index.ts --bundle --platform=browser --format=iife --target=es2020 --outfile=index.js",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "validate:package": "node scripts/validate-package.cjs",
+    "smoke": "node scripts/smoke.cjs",
+    "ci": "npm run lint && npm run typecheck && npm run test && npm run build && npm run validate:package && npm run smoke"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@typescript-eslint/eslint-plugin": "^8.44.1",
+    "@typescript-eslint/parser": "^8.44.1",
+    "esbuild": "^0.25.10",
+    "eslint": "^9.35.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
   "logseq": {
     "id": "fetch-todos"
   }
 }
-

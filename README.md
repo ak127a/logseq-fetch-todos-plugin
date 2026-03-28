@@ -22,17 +22,28 @@ Fetch TODO items from a referenced page and insert links to selected tasks into 
 
 ## Development
 
-This plugin is currently a plain JavaScript Logseq plugin with:
+This plugin now uses TypeScript source with a bundled plugin entry:
 
-- `index.html` as the plugin entry.
-- `index.js` for plugin logic.
+- `src/index.ts` for plugin logic.
+- `src/session.ts` for schema-validated session state and concurrency lock.
+- `index.js` as the generated runtime artifact loaded by Logseq.
+
+Common commands:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+- `npm run build`
+- `npm run ci`
+
+Debug logging can be toggled in plugin settings (`Enable debug logs`).
 
 ## Release
 
 This repository includes two GitHub Actions workflows:
 
-- `.github/workflows/auto-release.yml` creates a GitHub release on push to `master`/`main` using `v<package.json version>`.
-- `.github/workflows/publish.yml` builds and uploads the plugin zip for that release.
+- `.github/workflows/auto-release.yml` runs CI quality gates before creating a GitHub release.
+- `.github/workflows/publish.yml` runs CI gates, smoke-tests the zip, and uploads the release zip plus SHA-256 checksum.
 
 Notes:
 
