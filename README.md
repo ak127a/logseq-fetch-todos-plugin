@@ -43,7 +43,7 @@ Debug logging can be toggled in plugin settings (`Enable debug logs`).
 This repository includes two GitHub Actions workflows:
 
 - `.github/workflows/auto-release.yml` runs CI quality gates before creating a GitHub release.
-- `.github/workflows/publish.yml` runs CI gates, smoke-tests the zip, and uploads checksum/signature assets.
+- `.github/workflows/publish.yml` runs CI gates, smoke-tests the zip, and uploads the release zip plus SHA-256 checksum.
 
 Notes:
 

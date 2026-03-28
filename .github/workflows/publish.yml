@@ -70,33 +70,19 @@ jobs:
           set -euo pipefail
           unzip -t "${{ steps.build_zip.outputs.zip_path }}"
 
-      - name: Generate and verify checksums and signatures
+      - name: Generate and verify checksum
         id: verify_artifacts
         shell: bash
         run: |
           set -euo pipefail
           ZIP_PATH="${{ steps.build_zip.outputs.zip_path }}"
-          ZIP_DIR="$(dirname "$ZIP_PATH")"
-          ZIP_FILE="$(basename "$ZIP_PATH")"
 
           CHECKSUM_PATH="${ZIP_PATH}.sha256"
-          SIGNATURE_PATH="${ZIP_PATH}.sig"
-          PUBLIC_KEY_PATH="${ZIP_PATH}.pub"
-          PRIVATE_KEY_PATH="${ZIP_DIR}/signing-private.pem"
 
           sha256sum "$ZIP_PATH" > "$CHECKSUM_PATH"
-          (cd "$ZIP_DIR" && sha256sum -c "$(basename "$CHECKSUM_PATH")")
-
-          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$PRIVATE_KEY_PATH"
-          openssl rsa -pubout -in "$PRIVATE_KEY_PATH" -out "$PUBLIC_KEY_PATH"
-          openssl dgst -sha256 -sign "$PRIVATE_KEY_PATH" -out "$SIGNATURE_PATH" "$ZIP_PATH"
-          openssl dgst -sha256 -verify "$PUBLIC_KEY_PATH" -signature "$SIGNATURE_PATH" "$ZIP_PATH"
-
-          rm -f "$PRIVATE_KEY_PATH"
+          sha256sum -c "$CHECKSUM_PATH"
 
           echo "checksum_path=${CHECKSUM_PATH}" >> "$GITHUB_OUTPUT"
-          echo "signature_path=${SIGNATURE_PATH}" >> "$GITHUB_OUTPUT"
-          echo "public_key_path=${PUBLIC_KEY_PATH}" >> "$GITHUB_OUTPUT"
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
@@ -105,6 +91,4 @@ jobs:
           files: |
             ${{ steps.build_zip.outputs.zip_path }}
             ${{ steps.verify_artifacts.outputs.checksum_path }}
-            ${{ steps.verify_artifacts.outputs.signature_path }}
-            ${{ steps.verify_artifacts.outputs.public_key_path }}
           overwrite_files: true
