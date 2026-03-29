@@ -1150,6 +1150,12 @@ function bindUIEventHandlers(): void {
           .map((index) => session.todos[index])
           .filter((todo): todo is TodoItem => Boolean(todo));
 
+        debugLog("resolved selected todos", {
+          sessionId,
+          selectedCount: session.selectedIndices.length,
+          resolvedCount: selectedTodos.length,
+        });
+
         if (selectedTodos.length === 0) {
           setSessionPatch(sessionId, {
             selectedIndices: [],
@@ -1161,6 +1167,13 @@ function bindUIEventHandlers(): void {
         const [firstTodo, ...remainingTodos] = selectedTodos;
         const firstTodoReference = `((${firstTodo.uuid}))`;
         await logseq.Editor.updateBlock(session.sourceBlockUuid, firstTodoReference);
+
+        debugLog("updated source block with first todo", {
+          sessionId,
+          sourceBlockUuid: session.sourceBlockUuid,
+          firstTodoUuid: firstTodo.uuid,
+          remainingCount: remainingTodos.length,
+        });
 
         let insertAfterUuid = session.sourceBlockUuid;
         let lastInsertedContent = firstTodoReference;
@@ -1178,7 +1191,11 @@ function bindUIEventHandlers(): void {
         }
 
         closeSession(sessionId, "add-selected-complete", false);
-        await logseq.Editor.editBlock(insertAfterUuid, { pos: lastInsertedContent.length });
+
+        if (remainingTodos.length > 0) {
+          await logseq.Editor.editBlock(insertAfterUuid, { pos: lastInsertedContent.length });
+        }
+
         await logseq.App.showMsg(`Inserted ${selectedTodos.length} TODO reference(s).`);
       });
     }

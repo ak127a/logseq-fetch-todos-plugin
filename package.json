@@ -1,6 +1,6 @@
 {
   "name": "fetch-todos",
-  "version": "0.2",
+  "version": "0.3",
   "description": "Fetch TODOs from referenced pages in Logseq",
   "author": "Akshat",
   "license": "MIT",
