@@ -1243,8 +1243,6 @@ function main(): void {
     debugLog("slash command triggered");
     triggerTodoSelectorOpen("slash");
   });
-
-  logseq.App.showMsg("Fetch TODOs plugin loaded!");
 }
 
 logseq.ready(main).catch((error: unknown) => {

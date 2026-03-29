@@ -5198,7 +5198,6 @@
       debugLog("slash command triggered");
       triggerTodoSelectorOpen("slash");
     });
-    logseq.App.showMsg("Fetch TODOs plugin loaded!");
   }
   logseq.ready(main).catch((error) => {
     console.error("Fetch TODOs failed to start", error);
