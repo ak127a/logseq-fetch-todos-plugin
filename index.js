@@ -4059,6 +4059,7 @@
     sessionId: external_exports.string().min(1),
     sourceBlockUuid: external_exports.string().nullable(),
     pageName: external_exports.string(),
+    nestingDepth: external_exports.string(),
     status: SessionStatusSchema,
     todos: external_exports.array(TodoItemSchema),
     selectedIndices: external_exports.array(external_exports.number().int().nonnegative()),
@@ -4071,6 +4072,7 @@
       sessionId: createSessionId(),
       sourceBlockUuid,
       pageName: "",
+      nestingDepth: "0",
       status: "loading",
       todos: [],
       selectedIndices: [],
@@ -4141,6 +4143,13 @@
   var selectorStylesLoaded = false;
   var escapeCloseBlockedUntil = 0;
   var debugLoggingEnabled = false;
+  var NESTING_DEPTH_OPTIONS = [
+    { value: "0", label: "Page/root only" },
+    { value: "1", label: "1 level deep" },
+    { value: "2", label: "2 levels deep" },
+    { value: "3", label: "3 levels deep" },
+    { value: "all", label: "All levels" }
+  ];
   function isDebugEnabled() {
     return debugLoggingEnabled;
   }
@@ -4471,7 +4480,19 @@
       font-size: 0.95rem;
     }
 
+    .fts-depth {
+      border: 1px solid var(--ls-border-color, #d4d4d8);
+      border-radius: 0.5rem;
+      padding: 0.5rem 0.625rem;
+      background: var(--ls-secondary-background-color, #ffffff);
+      color: var(--ls-primary-text-color, #0f172a);
+      font-size: 0.9rem;
+      min-width: 10.5rem;
+      max-width: 12rem;
+    }
+
     .fts-search:focus,
+    .fts-depth:focus,
     .fts-action-btn:focus,
     .fts-close-btn:focus,
     .fts-item:focus,
@@ -4657,6 +4678,9 @@
   function renderReadyState(session) {
     const filtered = filterTodos(session.todos, session.searchQuery);
     const selectedCount = session.selectedIndices.length;
+    const nestingOptionsHtml = NESTING_DEPTH_OPTIONS.map(
+      (option) => `<option value="${option.value}" ${session.nestingDepth === option.value ? "selected" : ""}>${option.label}</option>`
+    ).join("");
     const listHtml = filtered.length === 0 ? `<div class="fts-state">No TODOs match your search.</div>` : filtered.map(({ index, todo }) => {
       const selected = session.selectedIndices.includes(index);
       return `
@@ -4689,6 +4713,14 @@
         data-action="updateSearchQuery"
         data-session-id="${session.sessionId}"
       />
+      <select
+        class="fts-depth"
+        data-action="updateNestingDepth"
+        data-session-id="${session.sessionId}"
+        aria-label="Nesting depth to search"
+      >
+        ${nestingOptionsHtml}
+      </select>
       <div class="fts-actions">
         <button
           type="button"
@@ -4900,11 +4932,14 @@
     }
     return normalizeText(firstLine.replace(/^TODO\s+/i, "").replace(/^\s*[-*]\s*/, ""));
   }
-  async function fetchTodosFromPage(pageName) {
+  async function fetchTodosFromPage(pageName, maxDepth) {
     const blocksRaw = await logseq.Editor.getPageBlocksTree(pageName);
     const blocks = Array.isArray(blocksRaw) ? blocksRaw : [];
     const todos = [];
-    const walk = (block, ancestors) => {
+    const walk = (block, ancestors, depth, maxDepth2) => {
+      if (maxDepth2 !== null && depth > maxDepth2) {
+        return;
+      }
       const content = String(block?.content ?? "");
       const todoText = extractTodoText(content);
       const heading = extractHeading(content);
@@ -4922,13 +4957,48 @@
       const nextAncestors = todoText ? cleanedAncestors : heading ? [...cleanedAncestors, heading] : cleanedAncestors;
       const children = Array.isArray(block?.children) ? block.children : [];
       for (const child of children) {
-        walk(child, nextAncestors);
+        walk(child, nextAncestors, depth + 1, maxDepth2);
       }
     };
     for (const block of blocks) {
-      walk(block, []);
+      walk(block, [], 0, maxDepth);
     }
     return todos;
+  }
+  function getMaxNestingDepth(depthValue) {
+    if (depthValue === "all") {
+      return null;
+    }
+    const parsed = Number.parseInt(depthValue, 10);
+    return Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+  }
+  async function reloadTodosForSession(sessionId) {
+    const session = getSession(sessionId);
+    if (!session) {
+      return;
+    }
+    if (!session.pageName) {
+      return;
+    }
+    const maxDepth = getMaxNestingDepth(session.nestingDepth);
+    const todos = await fetchTodosFromPage(session.pageName, maxDepth);
+    if (todos.length === 0) {
+      setSessionPatch(sessionId, {
+        status: "empty",
+        todos: [],
+        selectedIndices: []
+      });
+      renderTodoSelector(sessionId);
+      return;
+    }
+    setSessionPatch(sessionId, {
+      status: "ready",
+      todos,
+      selectedIndices: [],
+      searchQuery: "",
+      errorMessage: void 0
+    });
+    renderTodoSelector(sessionId);
   }
   async function hydrateSession(sessionId, currentBlock) {
     try {
@@ -4947,7 +5017,8 @@
         errorMessage: void 0
       });
       renderTodoSelector(sessionId);
-      const todos = await fetchTodosFromPage(pageName);
+      const maxDepth = getMaxNestingDepth(getSession(sessionId)?.nestingDepth ?? "0");
+      const todos = await fetchTodosFromPage(pageName, maxDepth);
       if (todos.length === 0) {
         setSessionPatch(sessionId, {
           pageName,
@@ -5043,6 +5114,35 @@
       if (updated) {
         renderTodoSelector(sessionId);
       }
+    });
+    document.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLSelectElement) || target.dataset.action !== "updateNestingDepth") {
+        return;
+      }
+      const sessionId = target.dataset.sessionId ?? activeSessionId;
+      if (!sessionId) {
+        return;
+      }
+      const optionExists = NESTING_DEPTH_OPTIONS.some((option) => option.value === target.value);
+      const nextNestingDepth = optionExists ? target.value : "0";
+      const updated = setSessionPatch(sessionId, {
+        nestingDepth: nextNestingDepth,
+        status: "loading",
+        errorMessage: void 0
+      });
+      if (!updated) {
+        return;
+      }
+      renderTodoSelector(sessionId);
+      void reloadTodosForSession(sessionId).catch((error) => {
+        debugLog("reloadTodosForSession failed", error);
+        setSessionPatch(sessionId, {
+          status: "error",
+          errorMessage: "Failed to load TODOs from the referenced page."
+        });
+        renderTodoSelector(sessionId);
+      });
     });
     document.addEventListener("click", (event) => {
       const target = event.target;

@@ -37,6 +37,13 @@ let uiEventHandlersBound = false;
 let selectorStylesLoaded = false;
 let escapeCloseBlockedUntil = 0;
 let debugLoggingEnabled = false;
+const NESTING_DEPTH_OPTIONS = [
+  { value: "0", label: "Page/root only" },
+  { value: "1", label: "1 level deep" },
+  { value: "2", label: "2 levels deep" },
+  { value: "3", label: "3 levels deep" },
+  { value: "all", label: "All levels" },
+] as const;
 
 function isDebugEnabled(): boolean {
   return debugLoggingEnabled;
@@ -421,7 +428,19 @@ function ensureSelectorStyles(): void {
       font-size: 0.95rem;
     }
 
+    .fts-depth {
+      border: 1px solid var(--ls-border-color, #d4d4d8);
+      border-radius: 0.5rem;
+      padding: 0.5rem 0.625rem;
+      background: var(--ls-secondary-background-color, #ffffff);
+      color: var(--ls-primary-text-color, #0f172a);
+      font-size: 0.9rem;
+      min-width: 10.5rem;
+      max-width: 12rem;
+    }
+
     .fts-search:focus,
+    .fts-depth:focus,
     .fts-action-btn:focus,
     .fts-close-btn:focus,
     .fts-item:focus,
@@ -608,6 +627,12 @@ function ensureSelectorStyles(): void {
 function renderReadyState(session: SessionState): string {
   const filtered = filterTodos(session.todos, session.searchQuery);
   const selectedCount = session.selectedIndices.length;
+  const nestingOptionsHtml = NESTING_DEPTH_OPTIONS
+    .map(
+      (option) =>
+        `<option value="${option.value}" ${session.nestingDepth === option.value ? "selected" : ""}>${option.label}</option>`,
+    )
+    .join("");
 
   const listHtml =
     filtered.length === 0
@@ -647,6 +672,14 @@ function renderReadyState(session: SessionState): string {
         data-action="updateSearchQuery"
         data-session-id="${session.sessionId}"
       />
+      <select
+        class="fts-depth"
+        data-action="updateNestingDepth"
+        data-session-id="${session.sessionId}"
+        aria-label="Nesting depth to search"
+      >
+        ${nestingOptionsHtml}
+      </select>
       <div class="fts-actions">
         <button
           type="button"
@@ -887,12 +920,16 @@ function extractHeading(content: string): string {
   return normalizeText(firstLine.replace(/^TODO\s+/i, "").replace(/^\s*[-*]\s*/, ""));
 }
 
-async function fetchTodosFromPage(pageName: string): Promise<TodoItem[]> {
+async function fetchTodosFromPage(pageName: string, maxDepth: number | null): Promise<TodoItem[]> {
   const blocksRaw = await logseq.Editor.getPageBlocksTree(pageName);
   const blocks = Array.isArray(blocksRaw) ? blocksRaw : [];
   const todos: TodoItem[] = [];
 
-  const walk = (block: any, ancestors: string[]): void => {
+  const walk = (block: any, ancestors: string[], depth: number, maxDepth: number | null): void => {
+    if (maxDepth !== null && depth > maxDepth) {
+      return;
+    }
+
     const content = String(block?.content ?? "");
     const todoText = extractTodoText(content);
     const heading = extractHeading(content);
@@ -913,15 +950,55 @@ async function fetchTodosFromPage(pageName: string): Promise<TodoItem[]> {
     const nextAncestors = todoText ? cleanedAncestors : heading ? [...cleanedAncestors, heading] : cleanedAncestors;
     const children = Array.isArray(block?.children) ? block.children : [];
     for (const child of children) {
-      walk(child, nextAncestors);
+      walk(child, nextAncestors, depth + 1, maxDepth);
     }
   };
 
   for (const block of blocks) {
-    walk(block, []);
+    walk(block, [], 0, maxDepth);
   }
 
   return todos;
+}
+
+function getMaxNestingDepth(depthValue: string): number | null {
+  if (depthValue === "all") {
+    return null;
+  }
+  const parsed = Number.parseInt(depthValue, 10);
+  return Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+}
+
+async function reloadTodosForSession(sessionId: string): Promise<void> {
+  const session = getSession(sessionId);
+  if (!session) {
+    return;
+  }
+
+  if (!session.pageName) {
+    return;
+  }
+
+  const maxDepth = getMaxNestingDepth(session.nestingDepth);
+  const todos = await fetchTodosFromPage(session.pageName, maxDepth);
+  if (todos.length === 0) {
+    setSessionPatch(sessionId, {
+      status: "empty",
+      todos: [],
+      selectedIndices: [],
+    });
+    renderTodoSelector(sessionId);
+    return;
+  }
+
+  setSessionPatch(sessionId, {
+    status: "ready",
+    todos,
+    selectedIndices: [],
+    searchQuery: "",
+    errorMessage: undefined,
+  });
+  renderTodoSelector(sessionId);
 }
 
 async function hydrateSession(sessionId: string, currentBlock: any): Promise<void> {
@@ -943,7 +1020,8 @@ async function hydrateSession(sessionId: string, currentBlock: any): Promise<voi
     });
     renderTodoSelector(sessionId);
 
-    const todos = await fetchTodosFromPage(pageName);
+    const maxDepth = getMaxNestingDepth(getSession(sessionId)?.nestingDepth ?? "0");
+    const todos = await fetchTodosFromPage(pageName, maxDepth);
     if (todos.length === 0) {
       setSessionPatch(sessionId, {
         pageName,
@@ -1054,6 +1132,40 @@ function bindUIEventHandlers(): void {
     if (updated) {
       renderTodoSelector(sessionId);
     }
+  });
+
+  document.addEventListener("change", (event: Event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement) || target.dataset.action !== "updateNestingDepth") {
+      return;
+    }
+
+    const sessionId = target.dataset.sessionId ?? activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+
+    const optionExists = NESTING_DEPTH_OPTIONS.some((option) => option.value === target.value);
+    const nextNestingDepth = optionExists ? target.value : "0";
+    const updated = setSessionPatch(sessionId, {
+      nestingDepth: nextNestingDepth,
+      status: "loading",
+      errorMessage: undefined,
+    });
+
+    if (!updated) {
+      return;
+    }
+
+    renderTodoSelector(sessionId);
+    void reloadTodosForSession(sessionId).catch((error: unknown) => {
+      debugLog("reloadTodosForSession failed", error);
+      setSessionPatch(sessionId, {
+        status: "error",
+        errorMessage: "Failed to load TODOs from the referenced page.",
+      });
+      renderTodoSelector(sessionId);
+    });
   });
 
   document.addEventListener("click", (event: MouseEvent) => {
