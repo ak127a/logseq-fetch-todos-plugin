@@ -943,7 +943,12 @@ async function fetchTodosFromPage(pageName: string, maxDepth: number | null): Pr
   const blocks = Array.isArray(blocksRaw) ? blocksRaw : [];
   const todos: TodoItem[] = [];
 
-  const walk = (block: any, ancestors: string[], depth: number, maxDepth: number | null): void => {
+  const walk = (
+    block: any,
+    ancestors: Array<{ label: string; uuid: string }>,
+    depth: number,
+    maxDepth: number | null,
+  ): void => {
     if (maxDepth !== null && depth > maxDepth) {
       return;
     }
@@ -951,10 +956,13 @@ async function fetchTodosFromPage(pageName: string, maxDepth: number | null): Pr
     const content = String(block?.content ?? "");
     const todoText = extractTodoText(content);
     const heading = extractHeading(content);
-    const cleanedAncestors = ancestors.filter(Boolean);
+    const cleanedAncestors = ancestors.filter(
+      (ancestor) => ancestor.label.trim().length > 0 && ancestor.uuid.trim().length > 0,
+    );
+    const ancestorLabels = cleanedAncestors.map((ancestor) => ancestor.label);
 
     if (todoText && block?.uuid) {
-      const pathSegments = [`[[${pageName}]]`, ...cleanedAncestors, todoText];
+      const pathSegments = [`[[${pageName}]]`, ...ancestorLabels, todoText];
       const path = pathSegments.join(" > ");
 
       todos.push({
@@ -962,12 +970,17 @@ async function fetchTodosFromPage(pageName: string, maxDepth: number | null): Pr
         content: todoText,
         pageName,
         path,
-        ancestors: cleanedAncestors,
+        ancestors: ancestorLabels,
+        ancestorUuids: cleanedAncestors.map((ancestor) => ancestor.uuid),
       });
     }
 
     const ancestorLabel = todoText ?? heading;
-    const nextAncestors = ancestorLabel ? [...cleanedAncestors, ancestorLabel] : cleanedAncestors;
+    const currentUuid = typeof block?.uuid === "string" ? block.uuid.trim() : "";
+    const nextAncestors =
+      ancestorLabel && currentUuid
+        ? [...cleanedAncestors, { label: ancestorLabel, uuid: currentUuid }]
+        : cleanedAncestors;
     const children = Array.isArray(block?.children) ? block.children : [];
     for (const child of children) {
       walk(child, nextAncestors, depth + 1, maxDepth);
@@ -1128,7 +1141,10 @@ function triggerTodoSelectorOpen(triggerSource: "slash" | "palette"): void {
 }
 
 async function insertTodoWithHierarchy(sourceUuid: string, todo: TodoItem): Promise<string | null> {
-  const hierarchy = [...todo.ancestors, `((${todo.uuid}))`];
+  const hierarchy = [
+    ...todo.ancestorUuids.map((ancestorUuid) => `((${ancestorUuid}))`),
+    `((${todo.uuid}))`,
+  ];
   if (hierarchy.length === 0) {
     return null;
   }
@@ -1157,7 +1173,10 @@ async function insertTodoHierarchySibling(
   afterUuid: string,
   todo: TodoItem,
 ): Promise<{ topUuid: string | null; lastUuid: string | null }> {
-  const hierarchy = [...todo.ancestors, `((${todo.uuid}))`];
+  const hierarchy = [
+    ...todo.ancestorUuids.map((ancestorUuid) => `((${ancestorUuid}))`),
+    `((${todo.uuid}))`,
+  ];
   if (hierarchy.length === 0) {
     return { topUuid: null, lastUuid: null };
   }

@@ -6,6 +6,7 @@ export const TodoItemSchema = z.object({
   pageName: z.string().min(1),
   path: z.string().min(1),
   ancestors: z.array(z.string().min(1)),
+  ancestorUuids: z.array(z.string().min(1)),
 });
 
 export type TodoItem = z.infer<typeof TodoItemSchema>;

@@ -4053,7 +4053,8 @@
     content: external_exports.string().min(1),
     pageName: external_exports.string().min(1),
     path: external_exports.string().min(1),
-    ancestors: external_exports.array(external_exports.string().min(1))
+    ancestors: external_exports.array(external_exports.string().min(1)),
+    ancestorUuids: external_exports.array(external_exports.string().min(1))
   });
   var SessionStatusSchema = external_exports.enum(["loading", "ready", "empty", "error"]);
   var SessionStateSchema = external_exports.object({
@@ -4964,20 +4965,25 @@
       const content = String(block?.content ?? "");
       const todoText = extractTodoText(content);
       const heading = extractHeading(content);
-      const cleanedAncestors = ancestors.filter(Boolean);
+      const cleanedAncestors = ancestors.filter(
+        (ancestor) => ancestor.label.trim().length > 0 && ancestor.uuid.trim().length > 0
+      );
+      const ancestorLabels = cleanedAncestors.map((ancestor) => ancestor.label);
       if (todoText && block?.uuid) {
-        const pathSegments = [`[[${pageName}]]`, ...cleanedAncestors, todoText];
+        const pathSegments = [`[[${pageName}]]`, ...ancestorLabels, todoText];
         const path = pathSegments.join(" > ");
         todos.push({
           uuid: String(block.uuid),
           content: todoText,
           pageName,
           path,
-          ancestors: cleanedAncestors
+          ancestors: ancestorLabels,
+          ancestorUuids: cleanedAncestors.map((ancestor) => ancestor.uuid)
         });
       }
       const ancestorLabel = todoText ?? heading;
-      const nextAncestors = ancestorLabel ? [...cleanedAncestors, ancestorLabel] : cleanedAncestors;
+      const currentUuid = typeof block?.uuid === "string" ? block.uuid.trim() : "";
+      const nextAncestors = ancestorLabel && currentUuid ? [...cleanedAncestors, { label: ancestorLabel, uuid: currentUuid }] : cleanedAncestors;
       const children = Array.isArray(block?.children) ? block.children : [];
       for (const child of children) {
         walk(child, nextAncestors, depth + 1, maxDepth2);
@@ -5118,7 +5124,10 @@
     }, COMMAND_TRIGGER_DELAY_MS);
   }
   async function insertTodoWithHierarchy(sourceUuid, todo) {
-    const hierarchy = [...todo.ancestors, `((${todo.uuid}))`];
+    const hierarchy = [
+      ...todo.ancestorUuids.map((ancestorUuid) => `((${ancestorUuid}))`),
+      `((${todo.uuid}))`
+    ];
     if (hierarchy.length === 0) {
       return null;
     }
@@ -5140,7 +5149,10 @@
     return lastInsertedUuid;
   }
   async function insertTodoHierarchySibling(afterUuid, todo) {
-    const hierarchy = [...todo.ancestors, `((${todo.uuid}))`];
+    const hierarchy = [
+      ...todo.ancestorUuids.map((ancestorUuid) => `((${ancestorUuid}))`),
+      `((${todo.uuid}))`
+    ];
     if (hierarchy.length === 0) {
       return { topUuid: null, lastUuid: null };
     }

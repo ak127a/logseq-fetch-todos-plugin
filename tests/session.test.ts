@@ -22,6 +22,7 @@ describe("session helpers", () => {
           pageName: "Project",
           path: "[[Project]] > Marketing > Write launch post",
           ancestors: ["Marketing"],
+          ancestorUuids: ["ancestor-1"],
         },
         {
           uuid: "todo-2",
@@ -29,6 +30,7 @@ describe("session helpers", () => {
           pageName: "Project",
           path: "[[Project]] > Engineering > Fix sync race",
           ancestors: ["Engineering"],
+          ancestorUuids: ["ancestor-2"],
         },
       ],
     });
