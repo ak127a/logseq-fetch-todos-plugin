@@ -37,6 +37,13 @@ let uiEventHandlersBound = false;
 let selectorStylesLoaded = false;
 let escapeCloseBlockedUntil = 0;
 let debugLoggingEnabled = false;
+const NESTING_DEPTH_OPTIONS = [
+  { value: "0", label: "Page/root only" },
+  { value: "1", label: "1 level deep" },
+  { value: "2", label: "2 levels deep" },
+  { value: "3", label: "3 levels deep" },
+  { value: "all", label: "All levels" },
+] as const;
 
 function isDebugEnabled(): boolean {
   return debugLoggingEnabled;
@@ -421,7 +428,19 @@ function ensureSelectorStyles(): void {
       font-size: 0.95rem;
     }
 
+    .fts-depth {
+      border: 1px solid var(--ls-border-color, #d4d4d8);
+      border-radius: 0.5rem;
+      padding: 0.5rem 0.625rem;
+      background: var(--ls-secondary-background-color, #ffffff);
+      color: var(--ls-primary-text-color, #0f172a);
+      font-size: 0.9rem;
+      min-width: 10.5rem;
+      max-width: 12rem;
+    }
+
     .fts-search:focus,
+    .fts-depth:focus,
     .fts-action-btn:focus,
     .fts-close-btn:focus,
     .fts-item:focus,
@@ -435,6 +454,15 @@ function ensureSelectorStyles(): void {
       display: flex;
       align-items: center;
       gap: 0.5rem;
+    }
+
+    .fts-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.8rem;
+      color: var(--ls-secondary-text-color, #4b5563);
+      white-space: nowrap;
     }
 
     .fts-action-btn {
@@ -608,6 +636,12 @@ function ensureSelectorStyles(): void {
 function renderReadyState(session: SessionState): string {
   const filtered = filterTodos(session.todos, session.searchQuery);
   const selectedCount = session.selectedIndices.length;
+  const nestingOptionsHtml = NESTING_DEPTH_OPTIONS
+    .map(
+      (option) =>
+        `<option value="${option.value}" ${session.nestingDepth === option.value ? "selected" : ""}>${option.label}</option>`,
+    )
+    .join("");
 
   const listHtml =
     filtered.length === 0
@@ -647,7 +681,24 @@ function renderReadyState(session: SessionState): string {
         data-action="updateSearchQuery"
         data-session-id="${session.sessionId}"
       />
+      <select
+        class="fts-depth"
+        data-action="updateNestingDepth"
+        data-session-id="${session.sessionId}"
+        aria-label="Nesting depth to search"
+      >
+        ${nestingOptionsHtml}
+      </select>
       <div class="fts-actions">
+        <label class="fts-toggle">
+          <input
+            type="checkbox"
+            data-action="updateInsertMode"
+            data-session-id="${session.sessionId}"
+            ${session.insertWithHierarchy ? "checked" : ""}
+          />
+          Insert with hierarchy
+        </label>
         <button
           type="button"
           class="fts-action-btn"
@@ -887,19 +938,31 @@ function extractHeading(content: string): string {
   return normalizeText(firstLine.replace(/^TODO\s+/i, "").replace(/^\s*[-*]\s*/, ""));
 }
 
-async function fetchTodosFromPage(pageName: string): Promise<TodoItem[]> {
+async function fetchTodosFromPage(pageName: string, maxDepth: number | null): Promise<TodoItem[]> {
   const blocksRaw = await logseq.Editor.getPageBlocksTree(pageName);
   const blocks = Array.isArray(blocksRaw) ? blocksRaw : [];
   const todos: TodoItem[] = [];
 
-  const walk = (block: any, ancestors: string[]): void => {
+  const walk = (
+    block: any,
+    ancestors: Array<{ label: string; uuid: string }>,
+    depth: number,
+    maxDepth: number | null,
+  ): void => {
+    if (maxDepth !== null && depth > maxDepth) {
+      return;
+    }
+
     const content = String(block?.content ?? "");
     const todoText = extractTodoText(content);
     const heading = extractHeading(content);
-    const cleanedAncestors = ancestors.filter(Boolean);
+    const cleanedAncestors = ancestors.filter(
+      (ancestor) => ancestor.label.trim().length > 0 && ancestor.uuid.trim().length > 0,
+    );
+    const ancestorLabels = cleanedAncestors.map((ancestor) => ancestor.label);
 
     if (todoText && block?.uuid) {
-      const pathSegments = [`[[${pageName}]]`, ...cleanedAncestors, todoText];
+      const pathSegments = [`[[${pageName}]]`, ...ancestorLabels, todoText];
       const path = pathSegments.join(" > ");
 
       todos.push({
@@ -907,21 +970,68 @@ async function fetchTodosFromPage(pageName: string): Promise<TodoItem[]> {
         content: todoText,
         pageName,
         path,
+        ancestors: ancestorLabels,
+        ancestorUuids: cleanedAncestors.map((ancestor) => ancestor.uuid),
       });
     }
 
-    const nextAncestors = todoText ? cleanedAncestors : heading ? [...cleanedAncestors, heading] : cleanedAncestors;
+    const ancestorLabel = todoText ?? heading;
+    const currentUuid = typeof block?.uuid === "string" ? block.uuid.trim() : "";
+    const nextAncestors =
+      ancestorLabel && currentUuid
+        ? [...cleanedAncestors, { label: ancestorLabel, uuid: currentUuid }]
+        : cleanedAncestors;
     const children = Array.isArray(block?.children) ? block.children : [];
     for (const child of children) {
-      walk(child, nextAncestors);
+      walk(child, nextAncestors, depth + 1, maxDepth);
     }
   };
 
   for (const block of blocks) {
-    walk(block, []);
+    walk(block, [], 0, maxDepth);
   }
 
   return todos;
+}
+
+function getMaxNestingDepth(depthValue: string): number | null {
+  if (depthValue === "all") {
+    return null;
+  }
+  const parsed = Number.parseInt(depthValue, 10);
+  return Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+}
+
+async function reloadTodosForSession(sessionId: string): Promise<void> {
+  const session = getSession(sessionId);
+  if (!session) {
+    return;
+  }
+
+  if (!session.pageName) {
+    return;
+  }
+
+  const maxDepth = getMaxNestingDepth(session.nestingDepth);
+  const todos = await fetchTodosFromPage(session.pageName, maxDepth);
+  if (todos.length === 0) {
+    setSessionPatch(sessionId, {
+      status: "empty",
+      todos: [],
+      selectedIndices: [],
+    });
+    renderTodoSelector(sessionId);
+    return;
+  }
+
+  setSessionPatch(sessionId, {
+    status: "ready",
+    todos,
+    selectedIndices: [],
+    searchQuery: "",
+    errorMessage: undefined,
+  });
+  renderTodoSelector(sessionId);
 }
 
 async function hydrateSession(sessionId: string, currentBlock: any): Promise<void> {
@@ -943,7 +1053,8 @@ async function hydrateSession(sessionId: string, currentBlock: any): Promise<voi
     });
     renderTodoSelector(sessionId);
 
-    const todos = await fetchTodosFromPage(pageName);
+    const maxDepth = getMaxNestingDepth(getSession(sessionId)?.nestingDepth ?? "0");
+    const todos = await fetchTodosFromPage(pageName, maxDepth);
     if (todos.length === 0) {
       setSessionPatch(sessionId, {
         pageName,
@@ -1029,6 +1140,74 @@ function triggerTodoSelectorOpen(triggerSource: "slash" | "palette"): void {
   }, COMMAND_TRIGGER_DELAY_MS);
 }
 
+async function insertTodoWithHierarchy(sourceUuid: string, todo: TodoItem): Promise<string | null> {
+  const hierarchy = [
+    ...todo.ancestorUuids.map((ancestorUuid) => `((${ancestorUuid}))`),
+    `((${todo.uuid}))`,
+  ];
+  if (hierarchy.length === 0) {
+    return null;
+  }
+
+  await logseq.Editor.updateBlock(sourceUuid, hierarchy[0]);
+
+  let parentUuid = sourceUuid;
+  let lastInsertedUuid = sourceUuid;
+  for (const content of hierarchy.slice(1)) {
+    const inserted = await logseq.Editor.insertBlock(parentUuid, content, {
+      sibling: false,
+      before: false,
+      focus: false,
+    });
+    if (!inserted?.uuid) {
+      return null;
+    }
+    parentUuid = inserted.uuid;
+    lastInsertedUuid = inserted.uuid;
+  }
+
+  return lastInsertedUuid;
+}
+
+async function insertTodoHierarchySibling(
+  afterUuid: string,
+  todo: TodoItem,
+): Promise<{ topUuid: string | null; lastUuid: string | null }> {
+  const hierarchy = [
+    ...todo.ancestorUuids.map((ancestorUuid) => `((${ancestorUuid}))`),
+    `((${todo.uuid}))`,
+  ];
+  if (hierarchy.length === 0) {
+    return { topUuid: null, lastUuid: null };
+  }
+
+  const top = await logseq.Editor.insertBlock(afterUuid, hierarchy[0], {
+    sibling: true,
+    before: false,
+    focus: false,
+  });
+  if (!top?.uuid) {
+    return { topUuid: null, lastUuid: null };
+  }
+
+  let parentUuid = top.uuid;
+  let lastUuid = top.uuid;
+  for (const content of hierarchy.slice(1)) {
+    const inserted = await logseq.Editor.insertBlock(parentUuid, content, {
+      sibling: false,
+      before: false,
+      focus: false,
+    });
+    if (!inserted?.uuid) {
+      return { topUuid: top.uuid, lastUuid };
+    }
+    parentUuid = inserted.uuid;
+    lastUuid = inserted.uuid;
+  }
+
+  return { topUuid: top.uuid, lastUuid };
+}
+
 function bindUIEventHandlers(): void {
   if (uiEventHandlersBound) {
     return;
@@ -1054,6 +1233,56 @@ function bindUIEventHandlers(): void {
     if (updated) {
       renderTodoSelector(sessionId);
     }
+  });
+
+  document.addEventListener("change", (event: Event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.dataset.action === "updateInsertMode") {
+      const sessionId = target.dataset.sessionId ?? activeSessionId;
+      if (!sessionId) {
+        return;
+      }
+
+      const updated = setSessionPatch(sessionId, {
+        insertWithHierarchy: target.checked,
+      });
+
+      if (updated) {
+        renderTodoSelector(sessionId);
+      }
+      return;
+    }
+
+    if (!(target instanceof HTMLSelectElement) || target.dataset.action !== "updateNestingDepth") {
+      return;
+    }
+
+    const sessionId = target.dataset.sessionId ?? activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+
+    const optionExists = NESTING_DEPTH_OPTIONS.some((option) => option.value === target.value);
+    const nextNestingDepth = optionExists ? target.value : "0";
+    const updated = setSessionPatch(sessionId, {
+      nestingDepth: nextNestingDepth,
+      status: "loading",
+      errorMessage: undefined,
+    });
+
+    if (!updated) {
+      return;
+    }
+
+    renderTodoSelector(sessionId);
+    void reloadTodosForSession(sessionId).catch((error: unknown) => {
+      debugLog("reloadTodosForSession failed", error);
+      setSessionPatch(sessionId, {
+        status: "error",
+        errorMessage: "Failed to load TODOs from the referenced page.",
+      });
+      renderTodoSelector(sessionId);
+    });
   });
 
   document.addEventListener("click", (event: MouseEvent) => {
@@ -1165,38 +1394,60 @@ function bindUIEventHandlers(): void {
         }
 
         const [firstTodo, ...remainingTodos] = selectedTodos;
-        const firstTodoReference = `((${firstTodo.uuid}))`;
-        await logseq.Editor.updateBlock(session.sourceBlockUuid, firstTodoReference);
+        let lastInsertedUuid = session.sourceBlockUuid;
+        let lastInsertedContent = `((${firstTodo.uuid}))`;
 
-        debugLog("updated source block with first todo", {
-          sessionId,
-          sourceBlockUuid: session.sourceBlockUuid,
-          firstTodoUuid: firstTodo.uuid,
-          remainingCount: remainingTodos.length,
-        });
+        if (session.insertWithHierarchy) {
+          const firstLeafUuid = await insertTodoWithHierarchy(session.sourceBlockUuid, firstTodo);
+          if (firstLeafUuid) {
+            lastInsertedUuid = firstLeafUuid;
+          }
 
-        let insertAfterUuid = session.sourceBlockUuid;
-        let lastInsertedContent = firstTodoReference;
-        for (const todo of remainingTodos) {
-          const todoReference = `((${todo.uuid}))`;
-          const inserted = await logseq.Editor.insertBlock(insertAfterUuid, todoReference, {
-            sibling: true,
-            before: false,
-            focus: false,
+          let insertAfterTopUuid = session.sourceBlockUuid;
+          for (const todo of remainingTodos) {
+            const inserted = await insertTodoHierarchySibling(insertAfterTopUuid, todo);
+            if (inserted.topUuid) {
+              insertAfterTopUuid = inserted.topUuid;
+            }
+            if (inserted.lastUuid) {
+              lastInsertedUuid = inserted.lastUuid;
+              lastInsertedContent = `((${todo.uuid}))`;
+            }
+          }
+        } else {
+          const firstTodoReference = `((${firstTodo.uuid}))`;
+          await logseq.Editor.updateBlock(session.sourceBlockUuid, firstTodoReference);
+
+          debugLog("updated source block with first todo", {
+            sessionId,
+            sourceBlockUuid: session.sourceBlockUuid,
+            firstTodoUuid: firstTodo.uuid,
+            remainingCount: remainingTodos.length,
           });
-          if (inserted?.uuid) {
-            insertAfterUuid = inserted.uuid;
-            lastInsertedContent = todoReference;
+
+          let insertAfterUuid = session.sourceBlockUuid;
+          for (const todo of remainingTodos) {
+            const todoReference = `((${todo.uuid}))`;
+            const inserted = await logseq.Editor.insertBlock(insertAfterUuid, todoReference, {
+              sibling: true,
+              before: false,
+              focus: false,
+            });
+            if (inserted?.uuid) {
+              insertAfterUuid = inserted.uuid;
+              lastInsertedUuid = inserted.uuid;
+              lastInsertedContent = todoReference;
+            }
           }
         }
 
         closeSession(sessionId, "add-selected-complete", false);
 
-        if (remainingTodos.length > 0) {
-          await logseq.Editor.editBlock(insertAfterUuid, { pos: lastInsertedContent.length });
-        }
+        await logseq.Editor.editBlock(lastInsertedUuid, { pos: lastInsertedContent.length });
 
-        await logseq.App.showMsg(`Inserted ${selectedTodos.length} TODO reference(s).`);
+        await logseq.App.showMsg(
+          `Inserted ${selectedTodos.length} TODO ${session.insertWithHierarchy ? "item(s) with hierarchy" : "reference(s)"}.`,
+        );
       });
     }
   });
