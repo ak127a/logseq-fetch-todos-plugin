@@ -5,6 +5,7 @@ export const TodoItemSchema = z.object({
   content: z.string().min(1),
   pageName: z.string().min(1),
   path: z.string().min(1),
+  ancestors: z.array(z.string().min(1)),
 });
 
 export type TodoItem = z.infer<typeof TodoItemSchema>;
@@ -17,6 +18,7 @@ export const SessionStateSchema = z.object({
   sourceBlockUuid: z.string().nullable(),
   pageName: z.string(),
   nestingDepth: z.string(),
+  insertWithHierarchy: z.boolean(),
   status: SessionStatusSchema,
   todos: z.array(TodoItemSchema),
   selectedIndices: z.array(z.number().int().nonnegative()),
@@ -33,6 +35,7 @@ export function createSessionState(sourceBlockUuid: string | null): SessionState
     sourceBlockUuid,
     pageName: "",
     nestingDepth: "0",
+    insertWithHierarchy: false,
     status: "loading",
     todos: [],
     selectedIndices: [],

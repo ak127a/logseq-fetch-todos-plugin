@@ -4052,7 +4052,8 @@
     uuid: external_exports.string().min(1),
     content: external_exports.string().min(1),
     pageName: external_exports.string().min(1),
-    path: external_exports.string().min(1)
+    path: external_exports.string().min(1),
+    ancestors: external_exports.array(external_exports.string().min(1))
   });
   var SessionStatusSchema = external_exports.enum(["loading", "ready", "empty", "error"]);
   var SessionStateSchema = external_exports.object({
@@ -4060,6 +4061,7 @@
     sourceBlockUuid: external_exports.string().nullable(),
     pageName: external_exports.string(),
     nestingDepth: external_exports.string(),
+    insertWithHierarchy: external_exports.boolean(),
     status: SessionStatusSchema,
     todos: external_exports.array(TodoItemSchema),
     selectedIndices: external_exports.array(external_exports.number().int().nonnegative()),
@@ -4073,6 +4075,7 @@
       sourceBlockUuid,
       pageName: "",
       nestingDepth: "0",
+      insertWithHierarchy: false,
       status: "loading",
       todos: [],
       selectedIndices: [],
@@ -4508,6 +4511,15 @@
       gap: 0.5rem;
     }
 
+    .fts-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.8rem;
+      color: var(--ls-secondary-text-color, #4b5563);
+      white-space: nowrap;
+    }
+
     .fts-action-btn {
       border: 1px solid var(--ls-border-color, #d4d4d8);
       border-radius: 0.5rem;
@@ -4722,6 +4734,15 @@
         ${nestingOptionsHtml}
       </select>
       <div class="fts-actions">
+        <label class="fts-toggle">
+          <input
+            type="checkbox"
+            data-action="updateInsertMode"
+            data-session-id="${session.sessionId}"
+            ${session.insertWithHierarchy ? "checked" : ""}
+          />
+          Insert with hierarchy
+        </label>
         <button
           type="button"
           class="fts-action-btn"
@@ -4951,7 +4972,8 @@
           uuid: String(block.uuid),
           content: todoText,
           pageName,
-          path
+          path,
+          ancestors: cleanedAncestors
         });
       }
       const ancestorLabel = todoText ?? heading;
@@ -5095,6 +5117,57 @@
       });
     }, COMMAND_TRIGGER_DELAY_MS);
   }
+  async function insertTodoWithHierarchy(sourceUuid, todo) {
+    const hierarchy = [...todo.ancestors, `((${todo.uuid}))`];
+    if (hierarchy.length === 0) {
+      return null;
+    }
+    await logseq.Editor.updateBlock(sourceUuid, hierarchy[0]);
+    let parentUuid = sourceUuid;
+    let lastInsertedUuid = sourceUuid;
+    for (const content of hierarchy.slice(1)) {
+      const inserted = await logseq.Editor.insertBlock(parentUuid, content, {
+        sibling: false,
+        before: false,
+        focus: false
+      });
+      if (!inserted?.uuid) {
+        return null;
+      }
+      parentUuid = inserted.uuid;
+      lastInsertedUuid = inserted.uuid;
+    }
+    return lastInsertedUuid;
+  }
+  async function insertTodoHierarchySibling(afterUuid, todo) {
+    const hierarchy = [...todo.ancestors, `((${todo.uuid}))`];
+    if (hierarchy.length === 0) {
+      return { topUuid: null, lastUuid: null };
+    }
+    const top = await logseq.Editor.insertBlock(afterUuid, hierarchy[0], {
+      sibling: true,
+      before: false,
+      focus: false
+    });
+    if (!top?.uuid) {
+      return { topUuid: null, lastUuid: null };
+    }
+    let parentUuid = top.uuid;
+    let lastUuid = top.uuid;
+    for (const content of hierarchy.slice(1)) {
+      const inserted = await logseq.Editor.insertBlock(parentUuid, content, {
+        sibling: false,
+        before: false,
+        focus: false
+      });
+      if (!inserted?.uuid) {
+        return { topUuid: top.uuid, lastUuid };
+      }
+      parentUuid = inserted.uuid;
+      lastUuid = inserted.uuid;
+    }
+    return { topUuid: top.uuid, lastUuid };
+  }
   function bindUIEventHandlers() {
     if (uiEventHandlersBound) {
       return;
@@ -5118,6 +5191,19 @@
     });
     document.addEventListener("change", (event) => {
       const target = event.target;
+      if (target instanceof HTMLInputElement && target.dataset.action === "updateInsertMode") {
+        const sessionId2 = target.dataset.sessionId ?? activeSessionId;
+        if (!sessionId2) {
+          return;
+        }
+        const updated2 = setSessionPatch(sessionId2, {
+          insertWithHierarchy: target.checked
+        });
+        if (updated2) {
+          renderTodoSelector(sessionId2);
+        }
+        return;
+      }
       if (!(target instanceof HTMLSelectElement) || target.dataset.action !== "updateNestingDepth") {
         return;
       }
@@ -5231,33 +5317,53 @@
             return;
           }
           const [firstTodo, ...remainingTodos] = selectedTodos;
-          const firstTodoReference = `((${firstTodo.uuid}))`;
-          await logseq.Editor.updateBlock(session.sourceBlockUuid, firstTodoReference);
-          debugLog("updated source block with first todo", {
-            sessionId,
-            sourceBlockUuid: session.sourceBlockUuid,
-            firstTodoUuid: firstTodo.uuid,
-            remainingCount: remainingTodos.length
-          });
-          let insertAfterUuid = session.sourceBlockUuid;
-          let lastInsertedContent = firstTodoReference;
-          for (const todo of remainingTodos) {
-            const todoReference = `((${todo.uuid}))`;
-            const inserted = await logseq.Editor.insertBlock(insertAfterUuid, todoReference, {
-              sibling: true,
-              before: false,
-              focus: false
+          let lastInsertedUuid = session.sourceBlockUuid;
+          let lastInsertedContent = `((${firstTodo.uuid}))`;
+          if (session.insertWithHierarchy) {
+            const firstLeafUuid = await insertTodoWithHierarchy(session.sourceBlockUuid, firstTodo);
+            if (firstLeafUuid) {
+              lastInsertedUuid = firstLeafUuid;
+            }
+            let insertAfterTopUuid = session.sourceBlockUuid;
+            for (const todo of remainingTodos) {
+              const inserted = await insertTodoHierarchySibling(insertAfterTopUuid, todo);
+              if (inserted.topUuid) {
+                insertAfterTopUuid = inserted.topUuid;
+              }
+              if (inserted.lastUuid) {
+                lastInsertedUuid = inserted.lastUuid;
+                lastInsertedContent = `((${todo.uuid}))`;
+              }
+            }
+          } else {
+            const firstTodoReference = `((${firstTodo.uuid}))`;
+            await logseq.Editor.updateBlock(session.sourceBlockUuid, firstTodoReference);
+            debugLog("updated source block with first todo", {
+              sessionId,
+              sourceBlockUuid: session.sourceBlockUuid,
+              firstTodoUuid: firstTodo.uuid,
+              remainingCount: remainingTodos.length
             });
-            if (inserted?.uuid) {
-              insertAfterUuid = inserted.uuid;
-              lastInsertedContent = todoReference;
+            let insertAfterUuid = session.sourceBlockUuid;
+            for (const todo of remainingTodos) {
+              const todoReference = `((${todo.uuid}))`;
+              const inserted = await logseq.Editor.insertBlock(insertAfterUuid, todoReference, {
+                sibling: true,
+                before: false,
+                focus: false
+              });
+              if (inserted?.uuid) {
+                insertAfterUuid = inserted.uuid;
+                lastInsertedUuid = inserted.uuid;
+                lastInsertedContent = todoReference;
+              }
             }
           }
           closeSession(sessionId, "add-selected-complete", false);
-          if (remainingTodos.length > 0) {
-            await logseq.Editor.editBlock(insertAfterUuid, { pos: lastInsertedContent.length });
-          }
-          await logseq.App.showMsg(`Inserted ${selectedTodos.length} TODO reference(s).`);
+          await logseq.Editor.editBlock(lastInsertedUuid, { pos: lastInsertedContent.length });
+          await logseq.App.showMsg(
+            `Inserted ${selectedTodos.length} TODO ${session.insertWithHierarchy ? "item(s) with hierarchy" : "reference(s)"}.`
+          );
         });
       }
     });

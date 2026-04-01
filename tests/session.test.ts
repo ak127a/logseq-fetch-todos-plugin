@@ -21,12 +21,14 @@ describe("session helpers", () => {
           content: "Write launch post",
           pageName: "Project",
           path: "[[Project]] > Marketing > Write launch post",
+          ancestors: ["Marketing"],
         },
         {
           uuid: "todo-2",
           content: "Fix sync race",
           pageName: "Project",
           path: "[[Project]] > Engineering > Fix sync race",
+          ancestors: ["Engineering"],
         },
       ],
     });
