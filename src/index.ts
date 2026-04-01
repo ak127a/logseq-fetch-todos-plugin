@@ -947,7 +947,8 @@ async function fetchTodosFromPage(pageName: string, maxDepth: number | null): Pr
       });
     }
 
-    const nextAncestors = todoText ? cleanedAncestors : heading ? [...cleanedAncestors, heading] : cleanedAncestors;
+    const ancestorLabel = todoText ?? heading;
+    const nextAncestors = ancestorLabel ? [...cleanedAncestors, ancestorLabel] : cleanedAncestors;
     const children = Array.isArray(block?.children) ? block.children : [];
     for (const child of children) {
       walk(child, nextAncestors, depth + 1, maxDepth);
